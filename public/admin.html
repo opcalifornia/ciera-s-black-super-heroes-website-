@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Store admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css">
+<style>
+  body { font-family: var(--ui); font-size: 1rem; }
+  .admin { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .side { background: var(--ink); color: var(--paper); padding: 1.5rem 1rem; }
+  .side h1 { font-size: 1.1rem; margin: 0 0 1.5rem; padding: 0 .5rem; }
+  .side button { display: block; width: 100%; text-align: left; background: none; border: 0; color: #c3c8cf; padding: .65rem .5rem; cursor: pointer; border-radius: 2px; }
+  .side button[aria-current="true"], .side button:hover { background: #2c3749; color: var(--paper); }
+  .side a { color: #c3c8cf; display: block; padding: .65rem .5rem; font-size: .9rem; margin-top: 1rem; }
+  .content { padding: 2rem; max-width: 1100px; }
+  .content h2 { font-family: var(--display); font-stretch: 85%; font-weight: 800; font-size: 2rem; margin: 0 0 1.5rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
+  .stat { background: var(--card); border: 1px solid var(--line); padding: 1.25rem; }
+  .stat b { display: block; font-size: 1.9rem; }
+  .stat span { color: var(--muted); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; background: var(--card); }
+  th, td { text-align: left; padding: .7rem .8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #e2e5df; font-weight: 600; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); }
+  .toolbar { display: flex; gap: .75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .btn.sm { padding: .45rem .9rem; font-size: .85rem; }
+  .card { background: var(--card); border: 1px solid var(--line); padding: 1.5rem; margin-bottom: 1.5rem; }
+  .hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
+  .login { max-width: 360px; margin: 18vh auto; padding: 0 1.25rem; }
+  .unread td { font-weight: 600; }
+  @media (max-width: 760px) { .admin { grid-template-columns: 1fr; } .side { display: flex; flex-wrap: wrap; gap: .25rem; } .side h1 { width: 100%; margin-bottom: .5rem; } .side button { width: auto; } .content { padding: 1.25rem; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (c) => "$" + ((c || 0) / 100).toFixed(2);
+let TOKEN = sessionStorage.getItem("admin-token") || "";
+async function api(url, opts = {}) {
+  const r = await fetch("/api/admin" + url, { ...opts, headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN } });
+  if (r.status === 401) { sessionStorage.removeItem("admin-token"); TOKEN = ""; login("Wrong admin password."); throw new Error("auth"); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed.");
+  return d;
+}
+
+function login(msg = "") {
+  $("#root").innerHTML = `<form class="login form" id="lf">
+    <h1 style="font-family:var(--display);font-stretch:85%;margin:0">Store admin</h1>
+    <label>Admin password<input type="password" id="pw" autocomplete="current-password" required></label>
+    <button class="btn" type="submit">Sign in</button><p class="status err">${esc(msg)}</p></form>`;
+  $("#lf").onsubmit = (e) => { e.preventDefault(); TOKEN = $("#pw").value; sessionStorage.setItem("admin-token", TOKEN); shell(); };
+}
+
+const TABS = { overview: "Overview", content: "Site content", products: "Products", orders: "Orders", messages: "Messages", subscribers: "Subscribers" };
+function shell(tab = "overview") {
+  $("#root").innerHTML = `<div class="admin">
+    <nav class="side"><h1>Store admin</h1>
+      ${Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" aria-current="${k === tab}">${v}</button>`).join("")}
+      <a href="/" target="_blank">View store</a></nav>
+    <main class="content" id="view"></main></div>`;
+  document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => shell(b.dataset.tab)));
+  views[tab]().catch((e) => e.message !== "auth" && ($("#view").innerHTML = `<p class="status err">${esc(e.message)}</p>`));
+}
+
+const SITE_FIELDS = [
+  ["storeName", "Store / imprint name"], ["announcement", "Announcement bar"], ["bookTitle", "Book title (hero)"],
+  ["heroSubline", "Hero subline", "area"], ["endorsementQuote", "Endorsement quote", "area"], ["endorsementName", "Endorser name"],
+  ["endorsementCredentials", "Endorser credentials"], ["ctaLabel", "Primary button label"], ["amazonUrl", "Amazon link (leave blank to hide)"],
+  ["amazonLabel", "Amazon link label"], ["releaseNote", "Release / ship date line"], ["newsletterHeading", "Newsletter heading"],
+  ["newsletterBody", "Newsletter description", "area"], ["contactIntro", "Contact page intro", "area"], ["contactEmail", "Contact email"],
+  ["metaDescription", "Search & social description", "area"], ["privacyPolicy", "Privacy policy", "big"],
+  ["flatShipping", "Flat shipping (cents)", "num"], ["freeShippingThreshold", "Free shipping over (cents, 0 = off)", "num"],
+];
+
+const views = {
+  async overview() {
+    const s = await api("/summary");
+    $("#view").innerHTML = `<h2>Overview</h2><div class="stats">
+      <div class="stat"><b>${s.orders}</b><span>Orders</span></div>
+      <div class="stat"><b>${money(s.revenue)}</b><span>Paid + shipped revenue</span></div>
+      <div class="stat"><b>${s.subscribers}</b><span>Email subscribers</span></div>
+      <div class="stat"><b>${s.unreadMessages}</b><span>Unread messages</span></div>
+      <div class="stat"><b>${s.products}</b><span>Products</span></div></div>`;
+  },
+
+  async content() {
+    const s = await api("/site");
+    $("#view").innerHTML = `<h2>Site content</h2><form class="form card" id="sf" style="max-width:none">
+      ${SITE_FIELDS.map(([k, l, t]) => t === "area" || t === "big"
+        ? `<label>${l}<textarea name="${k}" style="min-height:${t === "big" ? 260 : 90}px">${esc(s[k])}</textarea></label>`
+        : `<label>${l}<input type="${t === "num" ? "number" : "text"}" name="${k}" value="${esc(s[k])}"></label>`).join("")}
+      <div><button class="btn" type="submit">Save content</button><p class="status" id="sst" role="status"></p></div></form>`;
+    $("#sf").onsubmit = async (e) => {
+      e.preventDefault();
+      try { await api("/site", { method: "PUT", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) }); $("#sst").className = "status ok"; $("#sst").textContent = "Content saved."; }
+      catch (err) { $("#sst").className = "status err"; $("#sst").textContent = err.message; }
+    };
+  },
+
+  async products() {
+    const list = await api("/products");
+    $("#view").innerHTML = `<h2>Products</h2>
+      <div class="toolbar"><button class="btn sm" id="newP">Add product</button></div>
+      <div id="pform"></div>
+      <div class="tablewrap"><table><thead><tr><th>Order</th><th>Title</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>
+      ${list.sort((a, b) => a.sort - b.sort).map((p) => `<tr><td>${p.sort}</td><td>${esc(p.title)}<br><span class="hint">/products/${esc(p.slug)}</span></td>
+        <td>${money(p.price)}</td><td>${p.inventory ?? "Unlimited"}</td><td>${p.active ? "Live" : "Hidden"}</td>
+        <td><button class="btn ghost sm" data-edit="${p.id}">Edit</button></td></tr>`).join("")}
+      </tbody></table></div>`;
+    $("#newP").onclick = () => productForm();
+    document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => productForm(list.find((p) => p.id === b.dataset.edit))));
+  },
+
+  async orders() {
+    const list = await api("/orders");
+    const statuses = ["pending_payment", "paid", "shipped", "cancelled", "refunded"];
+    $("#view").innerHTML = `<h2>Orders</h2>${!list.length ? "<p>No orders yet. They appear here as soon as a customer checks out.</p>" : `
+      <div class="tablewrap"><table><thead><tr><th>#</th><th>Date</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th></tr></thead><tbody>
+      ${list.map((o) => `<tr><td>${o.number}</td><td>${new Date(o.createdAt).toLocaleString()}</td>
+        <td>${esc(o.customer.name)}<br><span class="hint">${esc(o.customer.email)}<br>${esc(o.customer.address).replace(/\n/g, "<br>")}${o.customer.note ? "<br>Note: " + esc(o.customer.note) : ""}</span></td>
+        <td>${o.lines.map((l) => `${esc(l.title)} × ${l.qty}`).join("<br>")}</td><td>${money(o.total)}</td>
+        <td><select data-order="${o.id}">${statuses.map((s) => `<option ${s === o.status ? "selected" : ""} value="${s}">${s.replace("_", " ")}</option>`).join("")}</select></td></tr>`).join("")}
+      </tbody></table></div>`}`;
+    document.querySelectorAll("[data-order]").forEach((s) => (s.onchange = () => api("/orders/" + s.dataset.order, { method: "PUT", body: JSON.stringify({ status: s.value }) })));
+  },
+
+  async messages() {
+    const list = await api("/messages");
+    $("#view").innerHTML = `<h2>Messages</h2>${!list.length ? "<p>No messages yet. Contact form submissions appear here.</p>" : `
+      <div class="tablewrap"><table><thead><tr><th>Date</th><th>From</th><th>Message</th><th></th></tr></thead><tbody>
+      ${list.map((m) => `<tr class="${m.read ? "" : "unread"}"><td>${new Date(m.createdAt).toLocaleString()}</td>
+        <td>${esc(m.name)}<br><a href="mailto:${esc(m.email)}">${esc(m.email)}</a>${m.phone ? "<br>" + esc(m.phone) : ""}</td>
+        <td style="white-space:pre-line;font-weight:400">${esc(m.message)}</td>
+        <td><button class="btn ghost sm" data-read="${m.id}" data-val="${!m.read}">${m.read ? "Mark unread" : "Mark read"}</button></td></tr>`).join("")}
+      </tbody></table></div>`}`;
+    document.querySelectorAll("[data-read]").forEach((b) => (b.onclick = async () => { await api("/messages/" + b.dataset.read, { method: "PUT", body: JSON.stringify({ read: b.dataset.val === "true" }) }); views.messages(); }));
+  },
+
+  async subscribers() {
+    const list = await api("/subscribers");
+    $("#view").innerHTML = `<h2>Subscribers</h2><div class="toolbar"><button class="btn sm" id="csv">Download CSV</button></div>
+      ${!list.length ? "<p>No subscribers yet. Signups from the email form appear here.</p>" : `
+      <div class="tablewrap"><table><thead><tr><th>Email</th><th>Joined</th><th></th></tr></thead><tbody>
+      ${list.map((s) => `<tr><td>${esc(s.email)}</td><td>${new Date(s.createdAt).toLocaleDateString()}</td>
+        <td><button class="btn ghost sm" data-del="${s.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>`}`;
+    $("#csv").onclick = async () => {
+      const r = await fetch("/api/admin/subscribers.csv", { headers: { Authorization: "Bearer " + TOKEN } });
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await r.blob()), download: "subscribers.csv" }); a.click();
+    };
+    document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { if (confirm("Remove this subscriber?")) { await api("/subscribers/" + b.dataset.del, { method: "DELETE" }); views.subscribers(); } }));
+  },
+};
+
+function productForm(p = {}) {
+  $("#pform").innerHTML = `<form class="form card" id="pf" style="max-width:none">
+    <h3 style="margin:0">${p.id ? "Edit product" : "New product"}</h3>
+    <label>Title<input type="text" name="title" value="${esc(p.title)}" required></label>
+    <div class="two"><label>URL slug <span class="hint">leave blank to generate</span><input type="text" name="slug" value="${esc(p.slug)}"></label>
+      <label>Badge <span class="hint">optional, e.g. Limited</span><input type="text" name="badge" value="${esc(p.badge)}"></label></div>
+    <label>Description<textarea name="description">${esc(p.description)}</textarea></label>
+    <div class="two"><label>Price (cents) <span class="hint">2999 = $29.99</span><input type="number" name="price" min="0" value="${p.price ?? 0}"></label>
+      <label>Compare-at price (cents) <span class="hint">optional</span><input type="number" name="compareAt" min="0" value="${p.compareAt ?? ""}"></label></div>
+    <div class="two"><label>Inventory <span class="hint">blank = unlimited</span><input type="number" name="inventory" value="${p.inventory ?? ""}"></label>
+      <label>Display order<input type="number" name="sort" value="${p.sort ?? ""}"></label></div>
+    <label style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" name="active" ${p.active !== false ? "checked" : ""}> Live on the store</label>
+    <div class="toolbar"><button class="btn" type="submit">${p.id ? "Save product" : "Add product"}</button>
+      ${p.id ? `<button class="btn ghost" type="button" id="delP">Delete product</button>` : ""}
+      <button class="btn ghost" type="button" id="cancelP">Cancel</button></div>
+    <p class="status" id="pst"></p></form>`;
+  $("#cancelP").onclick = () => ($("#pform").innerHTML = "");
+  if (p.id) $("#delP").onclick = async () => { if (confirm("Delete this product? This can't be undone.")) { await api("/products/" + p.id, { method: "DELETE" }); views.products(); } };
+  $("#pf").onsubmit = async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target)); d.active = !!e.target.active.checked;
+    try { await api("/products" + (p.id ? "/" + p.id : ""), { method: p.id ? "PUT" : "POST", body: JSON.stringify(d) }); views.products(); }
+    catch (err) { $("#pst").className = "status err"; $("#pst").textContent = err.message; }
+  };
+  $("#pform").scrollIntoView({ behavior: "smooth" });
+}
+
+TOKEN ? shell() : login();
+</script>
+</body>
+</html>

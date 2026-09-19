@@ -1,0 +1,43 @@
+{
+  "site": {
+    "storeName": "[Publisher or imprint name]",
+    "announcement": "[Announcement bar — short line about pre-orders, ship date, or a current offer]",
+    "bookTitle": "[Book title]",
+    "heroSubline": "[One-line hook for the book — what it is and who it's for]",
+    "endorsementQuote": "[Endorsement quote from a notable reader — one or two sentences on why this book matters]",
+    "endorsementName": "[Endorser's name]",
+    "endorsementCredentials": "[Endorser's title, institution, and a book or credit of theirs]",
+    "ctaLabel": "[Primary button — e.g. Pre-order the book]",
+    "amazonUrl": "",
+    "amazonLabel": "[Secondary link — e.g. Also available on Amazon]",
+    "releaseNote": "[Release or ship date line]",
+    "newsletterHeading": "[Email signup heading]",
+    "newsletterBody": "[One sentence on what subscribers get — updates, deals, early access]",
+    "contactIntro": "[One or two sentences on who to contact for orders, press, speaking, or bulk purchases]",
+    "contactEmail": "[contact email address]",
+    "privacyPolicy": "[Privacy policy — what data the store collects (email, shipping address, order details), why, how long it's kept, who processes payments, and how customers can request deletion. Have the client's attorney supply final text.]",
+    "metaDescription": "[Search/social description — one or two sentences about the book]",
+    "flatShipping": 0,
+    "freeShippingThreshold": 0
+  },
+  "products": [
+    {
+      "id": "p1", "slug": "edition-one", "title": "[Edition 1 — e.g. First edition hardcover]",
+      "description": "[Describe this edition: format, page count, trim size, what's included, ship date.]",
+      "price": 0, "compareAt": null, "inventory": null, "badge": "", "sort": 1, "active": true
+    },
+    {
+      "id": "p2", "slug": "edition-two", "title": "[Edition 2 — e.g. Signed and numbered edition]",
+      "description": "[Describe what makes this edition special — signature, numbering, limited quantity, packaging.]",
+      "price": 0, "compareAt": null, "inventory": null, "badge": "[Limited]", "sort": 2, "active": true
+    },
+    {
+      "id": "p3", "slug": "bundle", "title": "[Bundle — e.g. Multi-copy gift pack]",
+      "description": "[Describe the bundle — how many copies, who it's meant to be shared with, the savings.]",
+      "price": 0, "compareAt": null, "inventory": null, "badge": "", "sort": 3, "active": true
+    }
+  ],
+  "subscribers": [],
+  "messages": [],
+  "orders": []
+}

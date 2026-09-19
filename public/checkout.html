@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Checkout | {store}</title>
+<meta name="description" content="">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body data-page="checkout">
+<div id="app-header"></div>
+<main id="MainContent">
+<div class="wrap" id="checkoutWrap" style="padding-bottom:4rem">
+  <div class="page-head"><h1>Checkout</h1></div>
+  <div class="pdp" style="padding-top:1.5rem">
+    <form class="form" id="checkoutForm" novalidate>
+      <div class="two">
+        <label>Full name<input type="text" name="name" autocomplete="name" required></label>
+        <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      </div>
+      <label>Shipping address<textarea name="address" autocomplete="street-address" style="min-height:110px" required></textarea></label>
+      <label>Order note (optional)<input type="text" name="note" placeholder="Gift message, signing request, delivery note"></label>
+      <div><button class="btn accent block" type="submit">Place order</button><p class="status" id="checkoutStatus" role="status"></p></div>
+    </form>
+    <aside style="font-family:var(--ui);background:var(--card);padding:1.5rem;border:1px solid var(--line)">
+      <h2 style="margin:0 0 1rem;font-size:1.1rem">Order summary</h2>
+      <div id="summary"></div>
+    </aside>
+  </div>
+</div>
+</main>
+<div id="app-footer"></div>
+<script src="/js/app.js"></script>
+</body>
+</html>
