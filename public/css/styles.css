@@ -53,6 +53,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* hero */
 .hero { position: relative; min-height: min(88vh, 820px); display: grid; align-items: end; overflow: hidden; }
 .hero .ph { position: absolute; inset: 0; border: 0; align-items: start; padding-top: 2rem; }
+.hero .hero-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .hero-inner { position: relative; padding: 4rem 1.25rem 3.5rem; max-width: var(--wrap); margin: 0 auto; width: 100%; }
 .hero h1 { font-family: var(--display); font-weight: 900; font-stretch: 75%; font-size: clamp(4rem, 15vw, 12.5rem); line-height: .82; letter-spacing: -.035em; margin: 0 0 1.5rem; text-transform: none; }
 .hero .subline { font-size: 1.3rem; max-width: 34ch; margin: 0 0 2rem; }
@@ -83,7 +84,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* products */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2.5rem 1.75rem; }
 .product-card { display: flex; flex-direction: column; }
-.product-card .ph { aspect-ratio: 4 / 5; }
+.product-card .ph, .product-card .media img { aspect-ratio: 4 / 5; }
+.product-card .media img { width: 100%; object-fit: cover; }
 .product-card a.media { text-decoration: none; position: relative; display: block; }
 .badge { position: absolute; top: .75rem; left: .75rem; background: var(--accent); color: var(--accent-ink); font-family: var(--ui); font-size: .8rem; font-weight: 700; padding: .2rem .6rem; }
 .product-card h3 { font-family: var(--ui); font-size: 1.05rem; font-weight: 600; margin: 1rem 0 .25rem; line-height: 1.35; }
@@ -96,9 +98,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
 
 /* product page */
 .pdp { display: grid; grid-template-columns: 1.1fr 1fr; gap: 3rem; padding: 3rem 0 4rem; align-items: start; }
-.pdp .ph.main { aspect-ratio: 4 / 5; }
+.pdp .ph.main, .pdp .main-img { aspect-ratio: 4 / 5; width: 100%; }
+.pdp .main-img { object-fit: cover; }
 .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-top: .75rem; }
 .thumbs .ph { aspect-ratio: 1; font-size: .75rem; }
+.thumbs img { aspect-ratio: 1; width: 100%; object-fit: cover; }
 .pdp h1 { font-family: var(--display); font-weight: 800; font-stretch: 85%; font-size: clamp(1.9rem, 4vw, 2.8rem); line-height: 1.05; letter-spacing: -.02em; margin: 0 0 1rem; }
 .pdp .price { font-size: 1.5rem; display: block; margin-bottom: 1.5rem; }
 .qty { display: inline-flex; border: 1px solid var(--ink); margin-bottom: 1rem; }
@@ -154,6 +158,7 @@ textarea { min-height: 150px; resize: vertical; }
 .drawer-foot small { color: var(--muted); display: block; margin-bottom: 1rem; }
 .line { display: grid; grid-template-columns: 72px 1fr auto; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); font-family: var(--ui); font-size: .92rem; }
 .line .ph { aspect-ratio: 4/5; font-size: .6rem; padding: .25rem; }
+.line img { aspect-ratio: 4/5; width: 100%; object-fit: cover; }
 .line .qty { margin: .5rem 0 0; }
 .line .qty button { width: 32px; height: 32px; font-size: 1rem; }
 .line .qty input { width: 36px; }

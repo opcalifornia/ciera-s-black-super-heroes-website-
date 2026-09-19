@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const store = require("./db");
 const { getStripe } = require("./lib/stripe");
 const { sendOrderConfirmation, sendOwnerOrderAlert, sendContactAlert } = require("./lib/email");
+const { upload, resizeAndSave, deleteUploadedFile, UPLOAD_DIR } = require("./lib/uploads");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
@@ -25,6 +26,7 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handl
 
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d" }));
 
 // simple per-IP rate limit for public POSTs
 const hits = new Map();
@@ -231,8 +233,67 @@ A.put("/products/:id", (req, res) => {
   res.json(store.updateProduct(req.params.id, patch));
 });
 A.delete("/products/:id", (req, res) => {
+  const p = store.getProductById(req.params.id);
+  if (p) p.images.forEach((img) => deleteUploadedFile(img.url));
   store.deleteProduct(req.params.id);
   res.json({ ok: true });
+});
+
+// ---------- image uploads ----------
+function uploadErrorHandler(err, req, res, next) {
+  if (!err) return next();
+  const message = err.code === "LIMIT_FILE_SIZE" ? "Image is larger than 8MB." : err.message || "Upload failed.";
+  res.status(400).json({ error: message });
+}
+
+A.post("/uploads/hero", upload.single("file"), uploadErrorHandler, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Choose an image to upload." });
+  try {
+    const url = await resizeAndSave(req.file.buffer, { maxWidth: 2400 });
+    const site = store.getSite();
+    if (site.heroImageUrl) deleteUploadedFile(site.heroImageUrl);
+    store.updateSite({ heroImageUrl: url });
+    res.json({ url });
+  } catch (err) {
+    res.status(400).json({ error: err.message || "Couldn't process that image." });
+  }
+});
+A.delete("/uploads/hero", (req, res) => {
+  const site = store.getSite();
+  if (site.heroImageUrl) deleteUploadedFile(site.heroImageUrl);
+  store.updateSite({ heroImageUrl: "" });
+  res.json({ ok: true });
+});
+
+A.post("/products/:id/images", upload.single("file"), uploadErrorHandler, async (req, res) => {
+  const p = store.getProductById(req.params.id);
+  if (!p) return res.status(404).json({ error: "Product not found." });
+  if (p.images.length >= 4) return res.status(400).json({ error: "This product already has 4 photos. Remove one first." });
+  if (!req.file) return res.status(400).json({ error: "Choose an image to upload." });
+  try {
+    const url = await resizeAndSave(req.file.buffer, { maxWidth: 1600 });
+    const image = store.addProductImage(p.id, url);
+    res.json(image);
+  } catch (err) {
+    res.status(400).json({ error: err.message || "Couldn't process that image." });
+  }
+});
+A.delete("/products/:id/images/:imageId", (req, res) => {
+  const p = store.getProductById(req.params.id);
+  if (!p) return res.status(404).json({ error: "Product not found." });
+  const image = p.images.find((i) => i.id === req.params.imageId);
+  if (image) deleteUploadedFile(image.url);
+  store.deleteProductImage(p.id, req.params.imageId);
+  res.json({ ok: true });
+});
+A.put("/products/:id/images/reorder", (req, res) => {
+  const p = store.getProductById(req.params.id);
+  if (!p) return res.status(404).json({ error: "Product not found." });
+  const order = Array.isArray(req.body.order) ? req.body.order : [];
+  const valid = order.length === p.images.length && order.every((id) => p.images.some((i) => i.id === id));
+  if (!valid) return res.status(400).json({ error: "Image order doesn't match this product's photos." });
+  store.reorderProductImages(p.id, order);
+  res.json(store.getProductById(p.id));
 });
 
 A.get("/subscribers", (req, res) => res.json(store.listSubscribers()));

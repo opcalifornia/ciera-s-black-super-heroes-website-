@@ -48,6 +48,15 @@ async function api(url, opts = {}) {
   if (!r.ok) throw new Error(d.error || "Request failed.");
   return d;
 }
+async function apiUpload(url, file, method = "POST") {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch("/api/admin" + url, { method, body: fd, headers: { Authorization: "Bearer " + TOKEN } });
+  if (r.status === 401) { sessionStorage.removeItem("admin-token"); TOKEN = ""; login("Wrong admin password."); throw new Error("auth"); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Upload failed.");
+  return d;
+}
 
 function login(msg = "") {
   $("#root").innerHTML = `<form class="login form" id="lf">
@@ -91,7 +100,20 @@ const views = {
 
   async content() {
     const s = await api("/site");
-    $("#view").innerHTML = `<h2>Site content</h2><form class="form card" id="sf" style="max-width:none">
+    $("#view").innerHTML = `<h2>Site content</h2>
+      <div class="card" id="heroCard">
+        <h3 style="margin:0 0 1rem">Hero image</h3>
+        <div id="heroPreview" style="max-width:360px;aspect-ratio:3/2;background:#d9ddd6;display:grid;place-items:center;margin-bottom:1rem;overflow:hidden">
+          ${s.heroImageUrl ? `<img src="${esc(s.heroImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<span class="hint">No hero image yet — the placeholder box shows on the site.</span>`}
+        </div>
+        <div class="toolbar">
+          <label class="btn sm ghost" style="cursor:pointer">Upload image<input type="file" id="heroFile" accept="image/jpeg,image/png,image/webp" style="display:none"></label>
+          ${s.heroImageUrl ? `<button class="btn sm ghost" id="heroRemove" type="button">Remove image</button>` : ""}
+        </div>
+        <p class="hint">JPG, PNG, or WEBP, up to 8MB. Landscape (3:2), 2400px+ wide works best.</p>
+        <p class="status" id="heroStatus" role="status"></p>
+      </div>
+      <form class="form card" id="sf" style="max-width:none">
       ${SITE_FIELDS.map(([k, l, t]) => t === "area" || t === "big"
         ? `<label>${l}<textarea name="${k}" style="min-height:${t === "big" ? 260 : 90}px">${esc(s[k])}</textarea></label>`
         : `<label>${l}<input type="${t === "num" ? "number" : "text"}" name="${k}" value="${esc(s[k])}"></label>`).join("")}
@@ -100,6 +122,17 @@ const views = {
       e.preventDefault();
       try { await api("/site", { method: "PUT", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) }); $("#sst").className = "status ok"; $("#sst").textContent = "Content saved."; }
       catch (err) { $("#sst").className = "status err"; $("#sst").textContent = err.message; }
+    };
+    $("#heroFile").onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const st = $("#heroStatus");
+      try { await apiUpload("/uploads/hero", file); st.className = "status ok"; st.textContent = "Hero image updated."; views.content(); }
+      catch (err) { st.className = "status err"; st.textContent = err.message; }
+    };
+    if ($("#heroRemove")) $("#heroRemove").onclick = async () => {
+      if (!confirm("Remove the hero image? The placeholder box will show on the site until you upload another.")) return;
+      await api("/uploads/hero", { method: "DELETE" });
+      views.content();
     };
   },
 
@@ -172,16 +205,73 @@ function productForm(p = {}) {
     <div class="toolbar"><button class="btn" type="submit">${p.id ? "Save product" : "Add product"}</button>
       ${p.id ? `<button class="btn ghost" type="button" id="delP">Delete product</button>` : ""}
       <button class="btn ghost" type="button" id="cancelP">Cancel</button></div>
-    <p class="status" id="pst"></p></form>`;
+    <p class="status" id="pst"></p></form>
+    ${p.id ? `<div class="card" id="imgManager"><h3 style="margin:0 0 .75rem">Photos <span class="hint">up to 4 — drag to reorder</span></h3>
+      <div id="imgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.75rem;margin-bottom:1rem"></div>
+      <label class="btn sm ghost" style="cursor:pointer" id="imgAddWrap">Add photo<input type="file" id="imgFile" accept="image/jpeg,image/png,image/webp" style="display:none"></label>
+      <p class="hint">JPG, PNG, or WEBP, up to 8MB. Portrait (4:5) works best.</p>
+      <p class="status" id="imgStatus" role="status"></p></div>` : ""}`;
   $("#cancelP").onclick = () => ($("#pform").innerHTML = "");
   if (p.id) $("#delP").onclick = async () => { if (confirm("Delete this product? This can't be undone.")) { await api("/products/" + p.id, { method: "DELETE" }); views.products(); } };
   $("#pf").onsubmit = async (e) => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target)); d.active = !!e.target.active.checked;
-    try { await api("/products" + (p.id ? "/" + p.id : ""), { method: p.id ? "PUT" : "POST", body: JSON.stringify(d) }); views.products(); }
-    catch (err) { $("#pst").className = "status err"; $("#pst").textContent = err.message; }
+    try {
+      const saved = await api("/products" + (p.id ? "/" + p.id : ""), { method: p.id ? "PUT" : "POST", body: JSON.stringify(d) });
+      if (p.id) views.products(); else productForm(saved);
+    } catch (err) { $("#pst").className = "status err"; $("#pst").textContent = err.message; }
   };
+  if (p.id) renderImageManager(p);
   $("#pform").scrollIntoView({ behavior: "smooth" });
+}
+
+function renderImageManager(p) {
+  p.images = p.images || [];
+  const grid = $("#imgGrid");
+  const draw = () => {
+    const images = p.images;
+    grid.innerHTML = images.map((img) => `
+      <div class="imgthumb" draggable="true" data-id="${img.id}" style="position:relative;aspect-ratio:4/5;border:1px solid var(--line);cursor:grab;overflow:hidden">
+        <img src="${esc(img.url)}" alt="" style="width:100%;height:100%;object-fit:cover;pointer-events:none">
+        <button type="button" data-rm="${img.id}" aria-label="Remove photo" style="position:absolute;top:.25rem;right:.25rem;background:var(--ink);color:var(--paper);border:0;width:24px;height:24px;border-radius:50%;cursor:pointer">×</button>
+      </div>`).join("") || `<p class="hint" style="grid-column:1/-1">No photos yet.</p>`;
+    $("#imgAddWrap").style.display = images.length >= 4 ? "none" : "";
+
+    let dragId = null;
+    grid.querySelectorAll(".imgthumb").forEach((el) => {
+      el.ondragstart = () => { dragId = el.dataset.id; el.style.opacity = ".4"; };
+      el.ondragend = () => { el.style.opacity = ""; };
+      el.ondragover = (e) => e.preventDefault();
+      el.ondrop = async (e) => {
+        e.preventDefault();
+        const targetId = el.dataset.id;
+        if (!dragId || dragId === targetId) return;
+        const from = p.images.findIndex((i) => i.id === dragId), to = p.images.findIndex((i) => i.id === targetId);
+        p.images.splice(to, 0, p.images.splice(from, 1)[0]);
+        draw();
+        try { await api(`/products/${p.id}/images/reorder`, { method: "PUT", body: JSON.stringify({ order: p.images.map((i) => i.id) }) }); }
+        catch (err) { $("#imgStatus").className = "status err"; $("#imgStatus").textContent = err.message; }
+      };
+    });
+    grid.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => {
+      await api(`/products/${p.id}/images/${b.dataset.rm}`, { method: "DELETE" });
+      p.images = p.images.filter((i) => i.id !== b.dataset.rm);
+      draw();
+    }));
+  };
+  draw();
+
+  $("#imgFile").onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const st = $("#imgStatus");
+    try {
+      const img = await apiUpload(`/products/${p.id}/images`, file);
+      p.images.push(img);
+      st.textContent = "";
+      draw();
+    } catch (err) { st.className = "status err"; st.textContent = err.message; }
+    e.target.value = "";
+  };
 }
 
 TOKEN ? shell() : login();

@@ -24,7 +24,7 @@ const Cart = {
     const items = this.get();
     const found = items.find((i) => i.id === p.id);
     if (found) found.qty = Math.min(20, found.qty + qty);
-    else items.push({ id: p.id, slug: p.slug, title: p.title, price: p.price, qty });
+    else items.push({ id: p.id, slug: p.slug, title: p.title, price: p.price, qty, image: p.images && p.images[0] ? p.images[0].url : "" });
     this.set(items);
   },
   update(id, qty) { this.set(this.get().map((i) => (i.id === id ? { ...i, qty: Math.max(1, Math.min(20, qty)) } : i))); },
@@ -152,7 +152,7 @@ function renderCart() {
   }
   body.innerHTML = items.map((i) => `
     <div class="line">
-      <div class="ph">Cover</div>
+      ${i.image ? `<img src="${esc(i.image)}" alt="">` : `<div class="ph">Cover</div>`}
       <div>
         <a href="/products/${i.slug}">${esc(i.title)}</a>
         <div><span class="qty">
@@ -174,10 +174,11 @@ function renderCart() {
 }
 
 function productCard(p) {
+  const cover = p.images && p.images[0];
   return `
     <article class="product-card">
       <a class="media" href="/products/${p.slug}" aria-label="${esc(p.title)}">
-        <div class="ph">Product photo — book cover or edition shot, 4:5 portrait</div>
+        ${cover ? `<img src="${esc(cover.url)}" alt="">` : `<div class="ph">Product photo — book cover or edition shot, 4:5 portrait</div>`}
         ${p.badge ? `<span class="badge">${esc(p.badge)}</span>` : ""}
       </a>
       <h3><a href="/products/${p.slug}">${esc(p.title)}</a></h3>
@@ -198,7 +199,9 @@ function wireAdd(root, products) {
 const pages = {
   async home() {
     $("#hero").innerHTML = `
-      <div class="ph">Hero image — full-width author portrait or book cover photo, 3:2 landscape, min 2400px wide. Keep the lower left darker or simpler so the title stays readable.</div>
+      ${SITE.heroImageUrl
+        ? `<img class="hero-img" src="${esc(SITE.heroImageUrl)}" alt="">`
+        : `<div class="ph">Hero image — full-width author portrait or book cover photo, 3:2 landscape, min 2400px wide. Keep the lower left darker or simpler so the title stays readable.</div>`}
       <div class="hero-inner">
         <h1>${esc(SITE.bookTitle)}</h1>
         ${SITE.heroSubline ? `<p class="subline">${esc(SITE.heroSubline)}</p>` : ""}
@@ -229,11 +232,13 @@ const pages = {
     try { p = await api("/api/products/" + encodeURIComponent(slug)); }
     catch { $("#pdp").innerHTML = `<div class="page-head"><h1>Product not found</h1><p>This edition may have been removed. <a href="/catalog">View the catalog</a>.</p></div>`; return; }
     document.title = `${p.title} | ${SITE.storeName}`;
+    const images = p.images || [];
+    const altCaptions = ["Alt photo: spine or back cover", "Alt photo: interior spread", "Alt photo: signed page or packaging"];
     $("#pdp").innerHTML = `
       <div class="pdp">
         <div>
-          <div class="ph main">Main product photo — front cover or edition shot, 4:5 portrait</div>
-          <div class="thumbs"><div class="ph">Alt photo: spine or back cover</div><div class="ph">Alt photo: interior spread</div><div class="ph">Alt photo: signed page or packaging</div></div>
+          ${images[0] ? `<img class="main-img" src="${esc(images[0].url)}" alt="">` : `<div class="ph main">Main product photo — front cover or edition shot, 4:5 portrait</div>`}
+          <div class="thumbs">${altCaptions.map((cap, i) => images[i + 1] ? `<img src="${esc(images[i + 1].url)}" alt="">` : `<div class="ph">${cap}</div>`).join("")}</div>
         </div>
         <div>
           <h1>${esc(p.title)}</h1>
