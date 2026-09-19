@@ -210,7 +210,7 @@ const pages = {
           <cite>— <strong>${esc(SITE.endorsementName)}</strong>, ${esc(SITE.endorsementCredentials)}</cite>
         </blockquote>
         <div class="hero-actions">
-          <a class="btn accent" href="/catalog">${esc(SITE.ctaLabel)}</a>
+          <a class="btn light" href="/catalog">${esc(SITE.ctaLabel)}</a>
           ${SITE.amazonUrl ? `<a class="textlink" href="${esc(SITE.amazonUrl)}" target="_blank" rel="noopener">${esc(SITE.amazonLabel)}</a>` : ""}
           ${SITE.releaseNote ? `<span class="textlink" style="text-decoration:none">${esc(SITE.releaseNote)}</span>` : ""}
         </div>
