@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 const store = require("./db");
 const { getStripe } = require("./lib/stripe");
+const { sendOrderConfirmation, sendOwnerOrderAlert, sendContactAlert } = require("./lib/email");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
@@ -68,9 +69,10 @@ app.post("/api/contact", rateLimit, (req, res) => {
   if (!clean(name)) return res.status(400).json({ error: "Enter your name." });
   if (!isEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
   if (!clean(message)) return res.status(400).json({ error: "Enter a message." });
-  store.addMessage({
+  const saved = store.addMessage({
     name: clean(name, 120), email: clean(email, 200), phone: clean(phone, 40), message: clean(message, 5000),
   });
+  sendContactAlert(saved).catch((e) => console.error("Contact alert email error:", e.message));
   res.json({ ok: true, message: "Message sent. We'll reply by email." });
 });
 
@@ -172,7 +174,8 @@ async function handleStripeWebhook(req, res) {
       if (addressLines) store.db.prepare("UPDATE orders SET customer_address = ? WHERE id = ?").run(addressLines, order.id);
       for (const line of order.lines) store.decrementInventory(line.productId, line.qty);
       const paid = store.markOrderPaid(order.id, { paymentIntentId: session.payment_intent });
-      // EMAIL INTEGRATION POINT: send the customer confirmation + owner alert here.
+      sendOrderConfirmation(paid).catch((e) => console.error("Order confirmation email error:", e.message));
+      sendOwnerOrderAlert(paid).catch((e) => console.error("Owner order alert email error:", e.message));
     }
   }
 

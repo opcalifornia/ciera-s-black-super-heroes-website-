@@ -43,8 +43,11 @@ Admin (header `Authorization: Bearer <ADMIN_PASSWORD>`): /api/admin/summary, sit
    redirect to. `/api/stripe/webhook` verifies the event signature, marks the order paid,
    stores the Stripe session/payment-intent IDs, and decrements inventory. Set
    `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `PUBLIC_URL` — see `.env.example`.
-2. **Emails.** Send order confirmations and contact-form alerts (Resend, Postmark, SendGrid)
-   from `/api/orders` and `/api/contact`, and sync `/api/newsletter` to her mailing list tool.
+2. ~~**Emails.**~~ Done — order confirmations and owner/contact alerts send via Resend
+   (`lib/email.js`) from the webhook and `/api/contact`. Without `RESEND_API_KEY` set,
+   emails are logged to the console instead of sent, so local dev never breaks. Set
+   `ADMIN_EMAIL` to receive owner alerts. `/api/newsletter` still just stores subscribers —
+   sync it to a mailing list tool (Mailchimp, Resend Audiences, etc.) when she picks one.
 3. **Database.** The JSON file is fine for launch-scale traffic on a single server. On
    hosts with ephemeral disks (Render free tier, Heroku), use a persistent disk or move to Postgres.
 4. **Privacy policy.** Replace the placeholder with attorney-approved text.

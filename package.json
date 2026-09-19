@@ -13,6 +13,7 @@
     "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.1",
     "express": "^5.2.1",
+    "resend": "^6.28.1",
     "stripe": "^22.6.2"
   },
   "engines": {
