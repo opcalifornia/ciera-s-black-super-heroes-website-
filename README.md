@@ -20,6 +20,40 @@ datastore). Delete `store.db` to reset to the placeholders.
     npm run format      # prettier --write (server code; see .prettierignore)
     npm run format:check
 
+## Environment variables
+Copy `.env.example` to `.env` and fill in real values (loaded automatically via `dotenv`).
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `PORT` | no | Defaults to `3000`. |
+| `ADMIN_PASSWORD` | **yes** | Bcrypt-hashed into the database on first run. |
+| `NODE_ENV` | production only | Set to `production` so the admin session cookie gets `secure`. |
+| `STRIPE_SECRET_KEY` | for payments | From the Stripe dashboard. |
+| `STRIPE_WEBHOOK_SECRET` | for payments | See **Stripe webhook setup** below. |
+| `PUBLIC_URL` | for payments | This site's public URL, no trailing slash — used for Stripe redirect URLs, the sitemap, and canonical/OG tags. |
+| `SHIP_COUNTRIES` | no | Comma-separated ISO country codes Stripe collects a shipping address for. Defaults to `US,CA`. |
+| `RESEND_API_KEY` | for email | Without it, emails are logged to the console instead of sent. |
+| `RESEND_FROM_EMAIL` | no | Defaults to a Resend sandbox address; set a verified sender once you have one. |
+| `ADMIN_EMAIL` | for owner alerts | Where new-order and contact-form alerts go. |
+| `DB_PATH` / `UPLOAD_DIR` | no | Override where the SQLite file and uploaded images live (see **Deploying**). |
+
+## Stripe webhook setup
+`/api/stripe/webhook` needs `STRIPE_WEBHOOK_SECRET` to verify that events actually came from
+Stripe.
+
+**Local testing**, with the [Stripe CLI](https://docs.stripe.com/stripe-cli):
+```
+stripe login
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+The CLI prints a `whsec_...` value — put that in `.env` as `STRIPE_WEBHOOK_SECRET` and restart
+the server. Run `stripe trigger checkout.session.completed` to fire a test event, or just
+complete a real test-mode checkout (card `4242 4242 4242 4242`, any future expiry/CVC).
+
+**In production:** Stripe dashboard → Developers → Webhooks → Add endpoint →
+`https://<your-domain>/api/stripe/webhook`, listening for `checkout.session.completed`. Copy
+the signing secret it gives you into `STRIPE_WEBHOOK_SECRET` on your host.
+
 ## Filling it in
 Everything text-based is editable in **Admin → Site content** and **Admin → Products**
 (prices are in cents: 2999 = $29.99). Setting the Amazon link shows an "also on Amazon"
@@ -87,3 +121,24 @@ attempts are rate-limited per IP.
   pages also carry Book + Product JSON-LD.
 - `/robots.txt` (disallows `/admin`) and `/sitemap.xml` (home, catalog, contact, privacy, and
   every active product) are generated automatically.
+
+## Deploying
+A `Dockerfile` and `render.yaml` are included.
+
+**Render** (recommended — `render.yaml` is a [Render Blueprint](https://render.com/docs/blueprint-spec)):
+1. Push this repo to GitHub/GitLab and create a new Blueprint from it in the Render dashboard
+   (or `render blueprints launch` with the Render CLI).
+2. Render provisions a web service (built from the `Dockerfile`) plus a 1GB persistent disk
+   mounted at `/data`; `DB_PATH` and `UPLOAD_DIR` are already pointed at it in `render.yaml`, so
+   the SQLite file and uploaded images survive redeploys. `ADMIN_PASSWORD` is auto-generated —
+   find it in the service's Environment tab, or set your own.
+3. Fill in the `sync: false` env vars in the Render dashboard: `PUBLIC_URL` (your Render URL or
+   custom domain), `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and, if you want email,
+   `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `ADMIN_EMAIL`.
+4. Add the Stripe webhook endpoint (see above) pointing at your Render URL, and put its signing
+   secret into `STRIPE_WEBHOOK_SECRET`.
+
+**Any other Docker host:** `docker build -t book-storefront . && docker run -p 3000:3000
+--env-file .env -v book-storefront-data:/data -e DB_PATH=/data/store.db -e
+UPLOAD_DIR=/data/uploads book-storefront` — mount a volume at `/data` the same way so the
+database and uploads persist across container restarts.

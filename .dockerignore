@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+data
+uploads
+coverage
+tests
+.git
+.env
+*.md
