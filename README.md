@@ -41,9 +41,17 @@ Public: GET /api/site, /api/products, /api/products/:slug, /api/search?q=,
         /api/orders/by-session/:sessionId
         POST /api/newsletter, /api/contact, /api/orders (returns a Stripe Checkout URL)
         POST /api/stripe/webhook (Stripe only — signature-verified)
-Admin (header `Authorization: Bearer <ADMIN_PASSWORD>`): /api/admin/summary, site, products,
-        orders, messages, subscribers, subscribers.csv, uploads/hero,
+Admin (cookie session — see below): POST /api/admin/login, logout; GET session; /api/admin/summary,
+        site, products, orders, messages, subscribers, subscribers.csv, uploads/hero,
         products/:id/images, products/:id/images/:imageId, products/:id/images/reorder
+
+## Admin login
+Sign in at `/admin` with `ADMIN_PASSWORD`. The password is bcrypt-hashed into the database on
+first run (and re-hashed if you change `ADMIN_PASSWORD` and redeploy). A successful login sets
+an httpOnly, sameSite=strict session cookie (`secure` too once `NODE_ENV=production`, so serve
+admin over HTTPS in production); every admin write additionally requires an `X-CSRF-Token`
+header matching the token issued at login, which the built-in admin UI handles for you. Login
+attempts are rate-limited per IP.
 
 ## Before going live
 1. ~~**Payments.**~~ Done — `/api/orders` creates a pending order, then a Stripe Checkout

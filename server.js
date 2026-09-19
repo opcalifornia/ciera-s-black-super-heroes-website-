@@ -7,9 +7,10 @@ const store = require("./db");
 const { getStripe } = require("./lib/stripe");
 const { sendOrderConfirmation, sendOwnerOrderAlert, sendContactAlert } = require("./lib/email");
 const { upload, resizeAndSave, deleteUploadedFile, UPLOAD_DIR } = require("./lib/uploads");
+const cookieParser = require("cookie-parser");
+const auth = require("./lib/auth");
 
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 const SHIP_COUNTRIES = (process.env.SHIP_COUNTRIES || "US,CA").split(",").map((c) => c.trim()).filter(Boolean);
 
@@ -25,6 +26,7 @@ const app = express();
 app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
 app.use(express.json({ limit: "100kb" }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d" }));
 
@@ -184,16 +186,34 @@ async function handleStripeWebhook(req, res) {
   res.json({ received: true });
 }
 
-// ---------- admin API (Bearer token = ADMIN_PASSWORD) ----------
-function admin(req, res, next) {
-  const token = (req.headers.authorization || "").replace(/^Bearer /, "");
-  const a = Buffer.from(token), b = Buffer.from(ADMIN_PASSWORD);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b))
-    return res.status(401).json({ error: "Wrong admin password." });
+// ---------- admin auth (cookie session + CSRF) ----------
+const loginAttempts = new Map();
+function loginRateLimit(req, res, next) {
+  const key = req.ip;
+  const t = Date.now();
+  const list = (loginAttempts.get(key) || []).filter((x) => t - x < 15 * 60_000);
+  if (list.length >= 8) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
+  list.push(t);
+  loginAttempts.set(key, list);
   next();
 }
+
+app.post("/api/admin/login", loginRateLimit, (req, res) => {
+  if (!auth.verifyPassword((req.body || {}).password)) return res.status(401).json({ error: "Wrong admin password." });
+  const { token, csrfToken } = auth.createSession();
+  res.cookie(auth.SESSION_COOKIE, token, auth.cookieOptions());
+  res.json({ ok: true, csrfToken });
+});
+app.post("/api/admin/logout", (req, res) => {
+  auth.destroySession(req.cookies && req.cookies[auth.SESSION_COOKIE]);
+  res.clearCookie(auth.SESSION_COOKIE, { path: "/" });
+  res.json({ ok: true });
+});
+app.get("/api/admin/session", auth.requireSession, (req, res) => res.json({ ok: true, csrfToken: req.adminSession.csrfToken }));
+
 const A = express.Router();
-A.use(admin);
+A.use(auth.requireSession);
+A.use(auth.requireCsrf);
 
 A.get("/summary", (req, res) => res.json(store.summary()));
 

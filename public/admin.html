@@ -40,10 +40,12 @@
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (c) => "$" + ((c || 0) / 100).toFixed(2);
-let TOKEN = sessionStorage.getItem("admin-token") || "";
+let CSRF = "";
 async function api(url, opts = {}) {
-  const r = await fetch("/api/admin" + url, { ...opts, headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN } });
-  if (r.status === 401) { sessionStorage.removeItem("admin-token"); TOKEN = ""; login("Wrong admin password."); throw new Error("auth"); }
+  const method = (opts.method || "GET").toUpperCase();
+  const headers = { "Content-Type": "application/json", ...(method !== "GET" ? { "X-CSRF-Token": CSRF } : {}) };
+  const r = await fetch("/api/admin" + url, { ...opts, headers, credentials: "same-origin" });
+  if (r.status === 401) { CSRF = ""; login("Please sign in again."); throw new Error("auth"); }
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || "Request failed.");
   return d;
@@ -51,8 +53,8 @@ async function api(url, opts = {}) {
 async function apiUpload(url, file, method = "POST") {
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch("/api/admin" + url, { method, body: fd, headers: { Authorization: "Bearer " + TOKEN } });
-  if (r.status === 401) { sessionStorage.removeItem("admin-token"); TOKEN = ""; login("Wrong admin password."); throw new Error("auth"); }
+  const r = await fetch("/api/admin" + url, { method, body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": CSRF } });
+  if (r.status === 401) { CSRF = ""; login("Please sign in again."); throw new Error("auth"); }
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || "Upload failed.");
   return d;
@@ -63,7 +65,32 @@ function login(msg = "") {
     <h1 style="font-family:var(--display);font-stretch:85%;margin:0">Store admin</h1>
     <label>Admin password<input type="password" id="pw" autocomplete="current-password" required></label>
     <button class="btn" type="submit">Sign in</button><p class="status err">${esc(msg)}</p></form>`;
-  $("#lf").onsubmit = (e) => { e.preventDefault(); TOKEN = $("#pw").value; sessionStorage.setItem("admin-token", TOKEN); shell(); };
+  $("#lf").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button"), st = $(".status", e.target);
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/admin/login", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: $("#pw").value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Sign in failed.");
+      CSRF = d.csrfToken;
+      shell();
+    } catch (err) { st.textContent = err.message; btn.disabled = false; }
+  };
+}
+
+async function checkSession() {
+  try {
+    const r = await fetch("/api/admin/session", { credentials: "same-origin" });
+    if (!r.ok) return false;
+    const d = await r.json();
+    CSRF = d.csrfToken;
+    return true;
+  } catch { return false; }
 }
 
 const TABS = { overview: "Overview", content: "Site content", products: "Products", orders: "Orders", messages: "Messages", subscribers: "Subscribers" };
@@ -71,9 +98,11 @@ function shell(tab = "overview") {
   $("#root").innerHTML = `<div class="admin">
     <nav class="side"><h1>Store admin</h1>
       ${Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" aria-current="${k === tab}">${v}</button>`).join("")}
-      <a href="/" target="_blank">View store</a></nav>
+      <a href="/" target="_blank">View store</a>
+      <button id="logoutBtn" style="margin-top:.5rem">Log out</button></nav>
     <main class="content" id="view"></main></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => shell(b.dataset.tab)));
+  $("#logoutBtn").onclick = async () => { await fetch("/api/admin/logout", { method: "POST", credentials: "same-origin" }); CSRF = ""; login(); };
   views[tab]().catch((e) => e.message !== "auth" && ($("#view").innerHTML = `<p class="status err">${esc(e.message)}</p>`));
 }
 
@@ -183,7 +212,7 @@ const views = {
       ${list.map((s) => `<tr><td>${esc(s.email)}</td><td>${new Date(s.createdAt).toLocaleDateString()}</td>
         <td><button class="btn ghost sm" data-del="${s.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>`}`;
     $("#csv").onclick = async () => {
-      const r = await fetch("/api/admin/subscribers.csv", { headers: { Authorization: "Bearer " + TOKEN } });
+      const r = await fetch("/api/admin/subscribers.csv", { credentials: "same-origin" });
       const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await r.blob()), download: "subscribers.csv" }); a.click();
     };
     document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { if (confirm("Remove this subscriber?")) { await api("/subscribers/" + b.dataset.del, { method: "DELETE" }); views.subscribers(); } }));
@@ -274,7 +303,7 @@ function renderImageManager(p) {
   };
 }
 
-TOKEN ? shell() : login();
+checkSession().then((ok) => (ok ? shell() : login()));
 </script>
 </body>
 </html>
