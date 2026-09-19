@@ -69,4 +69,14 @@ attempts are rate-limited per IP.
    server. On hosts with ephemeral disks, mount a persistent disk over `data/` and `uploads/`
    (see `render.yaml`) so orders and images survive a redeploy.
 4. **Privacy policy.** Replace the placeholder with attorney-approved text.
-5. Set a strong `ADMIN_PASSWORD` and serve over HTTPS.
+5. Set a strong `ADMIN_PASSWORD` and serve over HTTPS (set `NODE_ENV=production`).
+
+## Hardening & SEO
+- `helmet` (with a CSP allowing Google Fonts and Stripe), `compression`, and `morgan` request
+  logging are on by default.
+- Every API input is validated with `zod` (`lib/schemas.js`).
+- Titles, meta descriptions, and Open Graph/Twitter tags are injected server-side per page from
+  site settings and product data, so social previews and crawlers see real content. Product
+  pages also carry Book + Product JSON-LD.
+- `/robots.txt` (disallows `/admin`) and `/sitemap.xml` (home, catalog, contact, privacy, and
+  every active product) are generated automatically.

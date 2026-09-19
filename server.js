@@ -2,33 +2,118 @@
 require("dotenv").config();
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const crypto = require("crypto");
+const helmet = require("helmet");
+const compression = require("compression");
+const morgan = require("morgan");
+const cookieParser = require("cookie-parser");
 const store = require("./db");
 const { getStripe } = require("./lib/stripe");
 const { sendOrderConfirmation, sendOwnerOrderAlert, sendContactAlert } = require("./lib/email");
 const { upload, resizeAndSave, deleteUploadedFile, UPLOAD_DIR } = require("./lib/uploads");
-const cookieParser = require("cookie-parser");
 const auth = require("./lib/auth");
+const { injectMeta } = require("./lib/meta");
+const {
+  validate, newsletterSchema, contactSchema, orderSchema, loginSchema,
+  siteUpdateSchema, productCreateSchema, productUpdateSchema,
+  orderStatusSchema, messageReadSchema, imagesReorderSchema, searchQuerySchema,
+} = require("./lib/schemas");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 const SHIP_COUNTRIES = (process.env.SHIP_COUNTRIES || "US,CA").split(",").map((c) => c.trim()).filter(Boolean);
+const PUBLIC_DIR = path.join(__dirname, "public");
 
-const isEmail = (s) => typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 const clean = (s, max = 2000) => String(s ?? "").trim().slice(0, max);
 const slugify = (s) => clean(s, 120).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const absoluteUrl = (p) => (p ? (p.startsWith("http") ? p : `${PUBLIC_URL}${p}`) : "");
 
 // ---------- app ----------
 const app = express();
+app.set("trust proxy", 1);
 
 // Stripe webhook needs the raw body for signature verification, so it must
 // be registered before the global express.json() body parser below.
 app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        // The admin panel is a single inline <script>; a stricter policy
+        // would need per-request nonces, which this static-file setup
+        // doesn't support.
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", "https://api.stripe.com"],
+        frameSrc: ["https://js.stripe.com", "https://hooks.stripe.com"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    },
+  })
+);
+app.use(compression());
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d" }));
+
+// ---------- SEO: per-page meta tags, sitemap, robots ----------
+// These routes render the static HTML shells with server-injected <title>,
+// description, and Open Graph/Twitter tags (and, for products, JSON-LD) so
+// crawlers that don't execute the client JS still see real content. They
+// must be registered before express.static() below, which would otherwise
+// serve the raw, un-injected files for the same paths.
+function sendPage(res, file, meta) {
+  const html = fs.readFileSync(path.join(PUBLIC_DIR, file), "utf8");
+  res.type("html").send(injectMeta(html, meta));
+}
+
+app.get("/", (req, res) => {
+  const site = store.getSite();
+  const title = site.bookTitle ? `${site.bookTitle} | ${site.storeName}` : site.storeName;
+  sendPage(res, "index.html", {
+    title, description: site.metaDescription, url: `${PUBLIC_URL}/`, image: absoluteUrl(site.heroImageUrl),
+  });
+});
+app.get("/catalog", (req, res) => {
+  const site = store.getSite();
+  sendPage(res, "catalog.html", {
+    title: `Catalog | ${site.storeName}`, description: site.metaDescription, url: `${PUBLIC_URL}/catalog`,
+  });
+});
+app.get("/contact", (req, res) => {
+  const site = store.getSite();
+  sendPage(res, "contact.html", {
+    title: `Contact | ${site.storeName}`, description: site.contactIntro || site.metaDescription, url: `${PUBLIC_URL}/contact`,
+  });
+});
+app.get("/privacy", (req, res) => {
+  const site = store.getSite();
+  sendPage(res, "privacy.html", {
+    title: `Privacy policy | ${site.storeName}`, description: site.metaDescription, url: `${PUBLIC_URL}/privacy`,
+  });
+});
+
+app.get("/robots.txt", (req, res) => {
+  res.type("text/plain").send(`User-agent: *\nDisallow: /admin\n\nSitemap: ${PUBLIC_URL}/sitemap.xml\n`);
+});
+app.get("/sitemap.xml", (req, res) => {
+  const staticPaths = ["/", "/catalog", "/contact", "/privacy"];
+  const productPaths = store.listProducts({ activeOnly: true }).map((p) => `/products/${p.slug}`);
+  const urls = [...staticPaths, ...productPaths]
+    .map((p) => `  <url><loc>${absoluteUrl(p)}</loc></url>`)
+    .join("\n");
+  res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+});
+
+app.use(express.static(PUBLIC_DIR, { extensions: ["html"] }));
 
 // simple per-IP rate limit for public POSTs
 const hits = new Map();
@@ -55,27 +140,21 @@ app.get("/api/products/:slug", (req, res) => {
   res.json(p);
 });
 
-app.get("/api/search", (req, res) => {
-  const q = clean(req.query.q, 100).toLowerCase();
+app.get("/api/search", validate(searchQuerySchema, "query"), (req, res) => {
+  const q = req.query.q.toLowerCase();
   if (!q) return res.json([]);
   res.json(store.searchProducts(q));
 });
 
-app.post("/api/newsletter", rateLimit, (req, res) => {
-  const email = clean(req.body.email, 200).toLowerCase();
-  if (!isEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
+app.post("/api/newsletter", rateLimit, validate(newsletterSchema), (req, res) => {
+  const email = req.body.email.toLowerCase();
   if (!store.findSubscriber(email)) store.addSubscriber(email);
   res.json({ ok: true, message: "You're on the list." });
 });
 
-app.post("/api/contact", rateLimit, (req, res) => {
-  const { name, email, phone, message } = req.body || {};
-  if (!clean(name)) return res.status(400).json({ error: "Enter your name." });
-  if (!isEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
-  if (!clean(message)) return res.status(400).json({ error: "Enter a message." });
-  const saved = store.addMessage({
-    name: clean(name, 120), email: clean(email, 200), phone: clean(phone, 40), message: clean(message, 5000),
-  });
+app.post("/api/contact", rateLimit, validate(contactSchema), (req, res) => {
+  const { name, email, phone, message } = req.body;
+  const saved = store.addMessage({ name, email, phone, message });
   sendContactAlert(saved).catch((e) => console.error("Contact alert email error:", e.message));
   res.json({ ok: true, message: "Message sent. We'll reply by email." });
 });
@@ -83,21 +162,17 @@ app.post("/api/contact", rateLimit, (req, res) => {
 // Checkout: prices are always recalculated server-side from the catalog.
 // Creates a pending order, then a Stripe Checkout Session priced from it.
 // The shipping address is collected by Stripe, not by our own form.
-app.post("/api/orders", rateLimit, async (req, res) => {
-  const { items, customer } = req.body || {};
-  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: "Your cart is empty." });
-  if (!customer || !clean(customer.name)) return res.status(400).json({ error: "Enter your name." });
-  if (!isEmail(customer.email)) return res.status(400).json({ error: "Enter a valid email address." });
+app.post("/api/orders", rateLimit, validate(orderSchema), async (req, res) => {
+  const { items, customer } = req.body;
 
   const lines = [];
   for (const it of items) {
     const p = store.getProductById(it.id);
-    const qty = Math.max(1, Math.min(20, parseInt(it.qty, 10) || 1));
     if (!p || !p.active) return res.status(400).json({ error: "An item in your cart is no longer available." });
-    if (p.inventory !== null && p.inventory < qty)
+    if (p.inventory !== null && p.inventory < it.qty)
       return res.status(400).json({ error: `Only ${p.inventory} left of "${p.title}".` });
     if (p.price <= 0) return res.status(400).json({ error: `"${p.title}" doesn't have a price set yet.` });
-    lines.push({ productId: p.id, title: p.title, unitPrice: p.price, qty });
+    lines.push({ productId: p.id, title: p.title, unitPrice: p.price, qty: it.qty });
   }
   const site = store.getSite();
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.qty, 0);
@@ -105,7 +180,7 @@ app.post("/api/orders", rateLimit, async (req, res) => {
 
   // Inventory is decremented on payment confirmation (the webhook), not here.
   const order = store.createOrder({
-    customer: { name: clean(customer.name, 120), email: clean(customer.email, 200), address: "", note: clean(customer.note, 1000) },
+    customer: { name: customer.name, email: customer.email, address: "", note: customer.note },
     lines, subtotal, shipping, total: subtotal + shipping,
   });
 
@@ -198,8 +273,8 @@ function loginRateLimit(req, res, next) {
   next();
 }
 
-app.post("/api/admin/login", loginRateLimit, (req, res) => {
-  if (!auth.verifyPassword((req.body || {}).password)) return res.status(401).json({ error: "Wrong admin password." });
+app.post("/api/admin/login", loginRateLimit, validate(loginSchema), (req, res) => {
+  if (!auth.verifyPassword(req.body.password)) return res.status(401).json({ error: "Wrong admin password." });
   const { token, csrfToken } = auth.createSession();
   res.cookie(auth.SESSION_COOKIE, token, auth.cookieOptions());
   res.json({ ok: true, csrfToken });
@@ -218,38 +293,37 @@ A.use(auth.requireCsrf);
 A.get("/summary", (req, res) => res.json(store.summary()));
 
 A.get("/site", (req, res) => res.json(store.getSite()));
-A.put("/site", (req, res) => res.json(store.updateSite(req.body || {})));
+A.put("/site", validate(siteUpdateSchema), (req, res) => res.json(store.updateSite(req.body)));
 
 A.get("/products", (req, res) => res.json(store.listProducts()));
-A.post("/products", (req, res) => {
-  const b = req.body || {};
-  if (!clean(b.title)) return res.status(400).json({ error: "Enter a product title." });
+A.post("/products", validate(productCreateSchema), (req, res) => {
+  const b = req.body;
   let slug = slugify(b.slug || b.title);
   const p = {
-    id: crypto.randomUUID(), slug, title: clean(b.title, 200),
-    description: clean(b.description, 5000), price: Math.max(0, parseInt(b.price, 10) || 0),
-    compareAt: b.compareAt ? parseInt(b.compareAt, 10) : null,
-    inventory: b.inventory === "" || b.inventory == null ? null : parseInt(b.inventory, 10),
-    badge: clean(b.badge, 40), sort: parseInt(b.sort, 10) || store.listProducts().length + 1,
-    active: b.active !== false,
+    id: crypto.randomUUID(), slug, title: b.title,
+    description: b.description, price: b.price,
+    compareAt: b.compareAt ?? null,
+    inventory: b.inventory ?? null,
+    badge: b.badge, sort: b.sort || store.listProducts().length + 1,
+    active: b.active,
   };
   if (store.slugExists(p.slug)) p.slug += "-" + p.id.slice(0, 4);
   res.json(store.createProduct(p));
 });
-A.put("/products/:id", (req, res) => {
+A.put("/products/:id", validate(productUpdateSchema), (req, res) => {
   const existing = store.getProductById(req.params.id);
   if (!existing) return res.status(404).json({ error: "Product not found." });
-  const b = req.body || {};
+  const b = req.body;
   const patch = {};
-  if ("title" in b) patch.title = clean(b.title, 200);
+  if ("title" in b) patch.title = b.title;
   if ("slug" in b && slugify(b.slug)) patch.slug = slugify(b.slug);
-  if ("description" in b) patch.description = clean(b.description, 5000);
-  if ("price" in b) patch.price = Math.max(0, parseInt(b.price, 10) || 0);
-  if ("compareAt" in b) patch.compareAt = b.compareAt ? parseInt(b.compareAt, 10) : null;
-  if ("inventory" in b) patch.inventory = b.inventory === "" || b.inventory == null ? null : parseInt(b.inventory, 10);
-  if ("badge" in b) patch.badge = clean(b.badge, 40);
-  if ("sort" in b) patch.sort = parseInt(b.sort, 10) || 0;
-  if ("active" in b) patch.active = !!b.active;
+  if ("description" in b) patch.description = b.description;
+  if ("price" in b) patch.price = b.price;
+  if ("compareAt" in b) patch.compareAt = b.compareAt ?? null;
+  if ("inventory" in b) patch.inventory = b.inventory ?? null;
+  if ("badge" in b) patch.badge = b.badge;
+  if ("sort" in b) patch.sort = b.sort || 0;
+  if ("active" in b) patch.active = b.active;
   res.json(store.updateProduct(req.params.id, patch));
 });
 A.delete("/products/:id", (req, res) => {
@@ -306,10 +380,10 @@ A.delete("/products/:id/images/:imageId", (req, res) => {
   store.deleteProductImage(p.id, req.params.imageId);
   res.json({ ok: true });
 });
-A.put("/products/:id/images/reorder", (req, res) => {
+A.put("/products/:id/images/reorder", validate(imagesReorderSchema), (req, res) => {
   const p = store.getProductById(req.params.id);
   if (!p) return res.status(404).json({ error: "Product not found." });
-  const order = Array.isArray(req.body.order) ? req.body.order : [];
+  const order = req.body.order;
   const valid = order.length === p.images.length && order.every((id) => p.images.some((i) => i.id === id));
   if (!valid) return res.status(400).json({ error: "Image order doesn't match this product's photos." });
   store.reorderProductImages(p.id, order);
@@ -327,26 +401,47 @@ A.delete("/subscribers/:id", (req, res) => {
 });
 
 A.get("/messages", (req, res) => res.json(store.listMessages()));
-A.put("/messages/:id", (req, res) => {
-  const m = store.updateMessage(req.params.id, { read: !!req.body.read });
+A.put("/messages/:id", validate(messageReadSchema), (req, res) => {
+  const m = store.updateMessage(req.params.id, { read: req.body.read });
   if (!m) return res.status(404).json({ error: "Message not found." });
   res.json(m);
 });
 
 A.get("/orders", (req, res) => res.json(store.listOrders()));
-A.put("/orders/:id", (req, res) => {
+A.put("/orders/:id", validate(orderStatusSchema), (req, res) => {
   const o = store.getOrderById(req.params.id);
   if (!o) return res.status(404).json({ error: "Order not found." });
-  const allowed = ["pending_payment", "paid", "shipped", "cancelled", "refunded"];
-  if (!allowed.includes(req.body.status)) return res.status(400).json({ error: "Unknown status." });
   res.json(store.updateOrderStatus(req.params.id, req.body.status));
 });
 
 app.use("/api/admin", A);
 
-// product pages: /products/:slug -> product.html
-app.get("/products/:slug", (req, res) => res.sendFile(path.join(__dirname, "public", "product.html")));
-app.use((req, res) => res.status(404).sendFile(path.join(__dirname, "public", "404.html")));
+// product pages: /products/:slug -> product.html, with Book + Product JSON-LD
+app.get("/products/:slug", (req, res) => {
+  const site = store.getSite();
+  const p = store.getProductBySlug(req.params.slug, { activeOnly: true });
+  if (!p) return res.status(404).sendFile(path.join(PUBLIC_DIR, "404.html"));
+
+  const url = `${PUBLIC_URL}/products/${p.slug}`;
+  const image = absoluteUrl((p.images[0] && p.images[0].url) || site.heroImageUrl);
+  const description = clean(p.description, 300) || site.metaDescription;
+  const inStock = p.inventory === null || p.inventory > 0;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": "Book", "@id": `${url}#book`, name: p.title, description, url, bookFormat: "https://schema.org/Hardcover" },
+      {
+        "@type": "Product", "@id": `${url}#product`, name: p.title, description, url, sku: p.id,
+        ...(image ? { image: [image] } : {}),
+        ...(p.price > 0
+          ? { offers: { "@type": "Offer", url, priceCurrency: "USD", price: (p.price / 100).toFixed(2), availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock" } }
+          : {}),
+      },
+    ],
+  };
+  sendPage(res, "product.html", { title: `${p.title} | ${site.storeName}`, description, url, image, jsonLd });
+});
+app.use((req, res) => res.status(404).sendFile(path.join(PUBLIC_DIR, "404.html")));
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`Book site running on http://localhost:${PORT}`));
