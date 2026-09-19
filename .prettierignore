@@ -1,0 +1,10 @@
+node_modules
+data
+uploads
+coverage
+package-lock.json
+
+# Hand-tuned, intentionally dense frontend markup/styles and docs — not
+# run through Prettier, to avoid churning carefully-formatted files.
+public/
+README.md

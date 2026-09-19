@@ -25,10 +25,26 @@ const now = () => new Date().toISOString();
 // serialized back out through the public/admin site-settings API.
 const NUMERIC_SITE_KEYS = new Set(["flatShipping", "freeShippingThreshold"]);
 const DEFAULT_SITE_KEYS = [
-  "storeName", "announcement", "bookTitle", "heroSubline", "endorsementQuote",
-  "endorsementName", "endorsementCredentials", "ctaLabel", "amazonUrl", "amazonLabel",
-  "releaseNote", "newsletterHeading", "newsletterBody", "contactIntro", "contactEmail",
-  "privacyPolicy", "metaDescription", "flatShipping", "freeShippingThreshold", "heroImageUrl",
+  "storeName",
+  "announcement",
+  "bookTitle",
+  "heroSubline",
+  "endorsementQuote",
+  "endorsementName",
+  "endorsementCredentials",
+  "ctaLabel",
+  "amazonUrl",
+  "amazonLabel",
+  "releaseNote",
+  "newsletterHeading",
+  "newsletterBody",
+  "contactIntro",
+  "contactEmail",
+  "privacyPolicy",
+  "metaDescription",
+  "flatShipping",
+  "freeShippingThreshold",
+  "heroImageUrl",
 ];
 
 function getSiteRaw() {
@@ -43,7 +59,7 @@ function getSite() {
   const site = {};
   for (const k of DEFAULT_SITE_KEYS) {
     if (k === "heroImageUrl") continue; // internal-ish, only used for rendering, but keep exposed
-    site[k] = NUMERIC_SITE_KEYS.has(k) ? Number(map[k] || 0) : map[k] ?? "";
+    site[k] = NUMERIC_SITE_KEYS.has(k) ? Number(map[k] || 0) : (map[k] ?? "");
   }
   site.heroImageUrl = map.heroImageUrl || "";
   return site;
@@ -86,9 +102,16 @@ function rowToProduct(row) {
     .prepare("SELECT id, url, position FROM product_images WHERE product_id = ? ORDER BY position ASC")
     .all(row.id);
   return {
-    id: row.id, slug: row.slug, title: row.title, description: row.description,
-    price: row.price, compareAt: row.compare_at, inventory: row.inventory,
-    badge: row.badge, sort: row.sort, active: !!row.active,
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    price: row.price,
+    compareAt: row.compare_at,
+    inventory: row.inventory,
+    badge: row.badge,
+    sort: row.sort,
+    active: !!row.active,
     images: images.map((i) => ({ id: i.id, url: i.url })),
   };
 }
@@ -123,9 +146,18 @@ function createProduct(p) {
     `INSERT INTO products (id, slug, title, description, price, compare_at, inventory, badge, sort, active, created_at, updated_at)
      VALUES (@id, @slug, @title, @description, @price, @compareAt, @inventory, @badge, @sort, @active, @createdAt, @updatedAt)`
   ).run({
-    id: p.id, slug: p.slug, title: p.title, description: p.description, price: p.price,
-    compareAt: p.compareAt, inventory: p.inventory, badge: p.badge, sort: p.sort,
-    active: p.active ? 1 : 0, createdAt: ts, updatedAt: ts,
+    id: p.id,
+    slug: p.slug,
+    title: p.title,
+    description: p.description,
+    price: p.price,
+    compareAt: p.compareAt,
+    inventory: p.inventory,
+    badge: p.badge,
+    sort: p.sort,
+    active: p.active ? 1 : 0,
+    createdAt: ts,
+    updatedAt: ts,
   });
   return getProductById(p.id);
 }
@@ -165,8 +197,13 @@ function decrementInventory(pid, qty) {
 function addProductImage(pid, url) {
   const row = db.prepare("SELECT COALESCE(MAX(position), -1) AS m FROM product_images WHERE product_id = ?").get(pid);
   const imgId = id();
-  db.prepare("INSERT INTO product_images (id, product_id, url, position, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(imgId, pid, url, row.m + 1, now());
+  db.prepare("INSERT INTO product_images (id, product_id, url, position, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    imgId,
+    pid,
+    url,
+    row.m + 1,
+    now()
+  );
   return { id: imgId, url };
 }
 function deleteProductImage(pid, imageId) {
@@ -203,8 +240,14 @@ function deleteSubscriber(sid) {
 // ---------- messages ----------
 function addMessage(m) {
   const row = { id: id(), name: m.name, email: m.email, phone: m.phone || "", message: m.message, read: 0, createdAt: now() };
-  db.prepare("INSERT INTO messages (id, name, email, phone, message, read, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)")
-    .run(row.id, row.name, row.email, row.phone, row.message, row.createdAt);
+  db.prepare("INSERT INTO messages (id, name, email, phone, message, read, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)").run(
+    row.id,
+    row.name,
+    row.email,
+    row.phone,
+    row.message,
+    row.createdAt
+  );
   return { ...row, read: false };
 }
 function listMessages() {
@@ -232,12 +275,18 @@ function rowToOrder(row) {
     .prepare("SELECT product_id AS productId, title, unit_price AS unitPrice, qty FROM order_lines WHERE order_id = ?")
     .all(row.id);
   return {
-    id: row.id, number: row.number, status: row.status,
+    id: row.id,
+    number: row.number,
+    status: row.status,
     customer: { name: row.customer_name, email: row.customer_email, address: row.customer_address, note: row.customer_note },
-    lines, subtotal: row.subtotal, shipping: row.shipping, total: row.total,
+    lines,
+    subtotal: row.subtotal,
+    shipping: row.shipping,
+    total: row.total,
     stripeCheckoutSessionId: row.stripe_checkout_session_id,
     stripePaymentIntentId: row.stripe_payment_intent_id,
-    createdAt: row.created_at, updatedAt: row.updated_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 function createOrder({ customer, lines, subtotal, shipping, total }) {
@@ -249,10 +298,28 @@ function createOrder({ customer, lines, subtotal, shipping, total }) {
       `INSERT INTO orders (id, number, status, customer_name, customer_email, customer_address, customer_note,
         subtotal, shipping, total, created_at, updated_at)
        VALUES (?, ?, 'pending_payment', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(orderId, number, customer.name, customer.email, customer.address || "", customer.note || "", subtotal, shipping, total, ts, ts);
+    ).run(
+      orderId,
+      number,
+      customer.name,
+      customer.email,
+      customer.address || "",
+      customer.note || "",
+      subtotal,
+      shipping,
+      total,
+      ts,
+      ts
+    );
     for (const l of lines) {
-      db.prepare("INSERT INTO order_lines (id, order_id, product_id, title, unit_price, qty) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id(), orderId, l.productId, l.title, l.unitPrice, l.qty);
+      db.prepare("INSERT INTO order_lines (id, order_id, product_id, title, unit_price, qty) VALUES (?, ?, ?, ?, ?, ?)").run(
+        id(),
+        orderId,
+        l.productId,
+        l.title,
+        l.unitPrice,
+        l.qty
+      );
     }
   });
   tx();
@@ -265,7 +332,10 @@ function getOrderByStripeSession(sessionId) {
   return rowToOrder(db.prepare("SELECT * FROM orders WHERE stripe_checkout_session_id = ?").get(sessionId));
 }
 function listOrders() {
-  return db.prepare("SELECT id FROM orders ORDER BY created_at DESC").all().map((r) => getOrderById(r.id));
+  return db
+    .prepare("SELECT id FROM orders ORDER BY created_at DESC")
+    .all()
+    .map((r) => getOrderById(r.id));
 }
 function setOrderStripeSession(orderId, sessionId) {
   db.prepare("UPDATE orders SET stripe_checkout_session_id = ?, updated_at = ? WHERE id = ?").run(sessionId, now(), orderId);
@@ -287,9 +357,7 @@ function summary() {
   const subscribers = db.prepare("SELECT COUNT(*) AS n FROM subscribers").get().n;
   const unreadMessages = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE read = 0").get().n;
   const orders = db.prepare("SELECT COUNT(*) AS n FROM orders").get().n;
-  const revenue = db
-    .prepare("SELECT COALESCE(SUM(total), 0) AS s FROM orders WHERE status IN ('paid', 'shipped')")
-    .get().s;
+  const revenue = db.prepare("SELECT COALESCE(SUM(total), 0) AS s FROM orders WHERE status IN ('paid', 'shipped')").get().s;
   return { products, subscribers, unreadMessages, orders, revenue };
 }
 
@@ -307,9 +375,16 @@ function seedIfEmpty() {
     if (!hasProducts && Array.isArray(seed.products)) {
       for (const p of seed.products) {
         createProduct({
-          id: p.id || id(), slug: p.slug, title: p.title, description: p.description,
-          price: p.price || 0, compareAt: p.compareAt ?? null, inventory: p.inventory ?? null,
-          badge: p.badge || "", sort: p.sort || 0, active: p.active !== false,
+          id: p.id || id(),
+          slug: p.slug,
+          title: p.title,
+          description: p.description,
+          price: p.price || 0,
+          compareAt: p.compareAt ?? null,
+          inventory: p.inventory ?? null,
+          badge: p.badge || "",
+          sort: p.sort || 0,
+          active: p.active !== false,
         });
       }
     }
@@ -320,13 +395,36 @@ seedIfEmpty();
 
 module.exports = {
   db,
-  getSite, updateSite, getInternalSetting, setInternalSetting,
-  listProducts, getProductBySlug, getProductById, searchProducts, slugExists,
-  createProduct, updateProduct, deleteProduct, decrementInventory,
-  addProductImage, deleteProductImage, reorderProductImages, countProductImages,
-  findSubscriber, addSubscriber, listSubscribers, deleteSubscriber,
-  addMessage, listMessages, updateMessage,
-  createOrder, getOrderById, getOrderByStripeSession, listOrders, setOrderStripeSession,
-  updateOrderStatus, markOrderPaid,
+  getSite,
+  updateSite,
+  getInternalSetting,
+  setInternalSetting,
+  listProducts,
+  getProductBySlug,
+  getProductById,
+  searchProducts,
+  slugExists,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  decrementInventory,
+  addProductImage,
+  deleteProductImage,
+  reorderProductImages,
+  countProductImages,
+  findSubscriber,
+  addSubscriber,
+  listSubscribers,
+  deleteSubscriber,
+  addMessage,
+  listMessages,
+  updateMessage,
+  createOrder,
+  getOrderById,
+  getOrderByStripeSession,
+  listOrders,
+  setOrderStripeSession,
+  updateOrderStatus,
+  markOrderPaid,
   summary,
 };

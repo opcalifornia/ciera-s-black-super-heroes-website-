@@ -15,18 +15,37 @@ const { upload, resizeAndSave, deleteUploadedFile, UPLOAD_DIR } = require("./lib
 const auth = require("./lib/auth");
 const { injectMeta } = require("./lib/meta");
 const {
-  validate, newsletterSchema, contactSchema, orderSchema, loginSchema,
-  siteUpdateSchema, productCreateSchema, productUpdateSchema,
-  orderStatusSchema, messageReadSchema, imagesReorderSchema, searchQuerySchema,
+  validate,
+  newsletterSchema,
+  contactSchema,
+  orderSchema,
+  loginSchema,
+  siteUpdateSchema,
+  productCreateSchema,
+  productUpdateSchema,
+  orderStatusSchema,
+  messageReadSchema,
+  imagesReorderSchema,
+  searchQuerySchema,
 } = require("./lib/schemas");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
-const SHIP_COUNTRIES = (process.env.SHIP_COUNTRIES || "US,CA").split(",").map((c) => c.trim()).filter(Boolean);
+const SHIP_COUNTRIES = (process.env.SHIP_COUNTRIES || "US,CA")
+  .split(",")
+  .map((c) => c.trim())
+  .filter(Boolean);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-const clean = (s, max = 2000) => String(s ?? "").trim().slice(0, max);
-const slugify = (s) => clean(s, 120).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const clean = (s, max = 2000) =>
+  String(s ?? "")
+    .trim()
+    .slice(0, max);
+const slugify = (s) =>
+  clean(s, 120)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 const absoluteUrl = (p) => (p ? (p.startsWith("http") ? p : `${PUBLIC_URL}${p}`) : "");
 
 // ---------- app ----------
@@ -59,7 +78,9 @@ app.use(
   })
 );
 app.use(compression());
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+if (process.env.NODE_ENV !== "test") {
+  app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+}
 app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d" }));
@@ -79,25 +100,34 @@ app.get("/", (req, res) => {
   const site = store.getSite();
   const title = site.bookTitle ? `${site.bookTitle} | ${site.storeName}` : site.storeName;
   sendPage(res, "index.html", {
-    title, description: site.metaDescription, url: `${PUBLIC_URL}/`, image: absoluteUrl(site.heroImageUrl),
+    title,
+    description: site.metaDescription,
+    url: `${PUBLIC_URL}/`,
+    image: absoluteUrl(site.heroImageUrl),
   });
 });
 app.get("/catalog", (req, res) => {
   const site = store.getSite();
   sendPage(res, "catalog.html", {
-    title: `Catalog | ${site.storeName}`, description: site.metaDescription, url: `${PUBLIC_URL}/catalog`,
+    title: `Catalog | ${site.storeName}`,
+    description: site.metaDescription,
+    url: `${PUBLIC_URL}/catalog`,
   });
 });
 app.get("/contact", (req, res) => {
   const site = store.getSite();
   sendPage(res, "contact.html", {
-    title: `Contact | ${site.storeName}`, description: site.contactIntro || site.metaDescription, url: `${PUBLIC_URL}/contact`,
+    title: `Contact | ${site.storeName}`,
+    description: site.contactIntro || site.metaDescription,
+    url: `${PUBLIC_URL}/contact`,
   });
 });
 app.get("/privacy", (req, res) => {
   const site = store.getSite();
   sendPage(res, "privacy.html", {
-    title: `Privacy policy | ${site.storeName}`, description: site.metaDescription, url: `${PUBLIC_URL}/privacy`,
+    title: `Privacy policy | ${site.storeName}`,
+    description: site.metaDescription,
+    url: `${PUBLIC_URL}/privacy`,
   });
 });
 
@@ -107,10 +137,12 @@ app.get("/robots.txt", (req, res) => {
 app.get("/sitemap.xml", (req, res) => {
   const staticPaths = ["/", "/catalog", "/contact", "/privacy"];
   const productPaths = store.listProducts({ activeOnly: true }).map((p) => `/products/${p.slug}`);
-  const urls = [...staticPaths, ...productPaths]
-    .map((p) => `  <url><loc>${absoluteUrl(p)}</loc></url>`)
-    .join("\n");
-  res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+  const urls = [...staticPaths, ...productPaths].map((p) => `  <url><loc>${absoluteUrl(p)}</loc></url>`).join("\n");
+  res
+    .type("application/xml")
+    .send(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`
+    );
 });
 
 app.use(express.static(PUBLIC_DIR, { extensions: ["html"] }));
@@ -141,7 +173,7 @@ app.get("/api/products/:slug", (req, res) => {
 });
 
 app.get("/api/search", validate(searchQuerySchema, "query"), (req, res) => {
-  const q = req.query.q.toLowerCase();
+  const q = req.validated.q.toLowerCase();
   if (!q) return res.json([]);
   res.json(store.searchProducts(q));
 });
@@ -181,7 +213,10 @@ app.post("/api/orders", rateLimit, validate(orderSchema), async (req, res) => {
   // Inventory is decremented on payment confirmation (the webhook), not here.
   const order = store.createOrder({
     customer: { name: customer.name, email: customer.email, address: "", note: customer.note },
-    lines, subtotal, shipping, total: subtotal + shipping,
+    lines,
+    subtotal,
+    shipping,
+    total: subtotal + shipping,
   });
 
   try {
@@ -300,11 +335,15 @@ A.post("/products", validate(productCreateSchema), (req, res) => {
   const b = req.body;
   let slug = slugify(b.slug || b.title);
   const p = {
-    id: crypto.randomUUID(), slug, title: b.title,
-    description: b.description, price: b.price,
+    id: crypto.randomUUID(),
+    slug,
+    title: b.title,
+    description: b.description,
+    price: b.price,
     compareAt: b.compareAt ?? null,
     inventory: b.inventory ?? null,
-    badge: b.badge, sort: b.sort || store.listProducts().length + 1,
+    badge: b.badge,
+    sort: b.sort || store.listProducts().length + 1,
     active: b.active,
   };
   if (store.slugExists(p.slug)) p.slug += "-" + p.id.slice(0, 4);
@@ -393,7 +432,13 @@ A.put("/products/:id/images/reorder", validate(imagesReorderSchema), (req, res) 
 A.get("/subscribers", (req, res) => res.json(store.listSubscribers()));
 A.get("/subscribers.csv", (req, res) => {
   res.type("text/csv").attachment("subscribers.csv");
-  res.send("email,subscribed_at\n" + store.listSubscribers().map((s) => `${s.email},${s.createdAt}`).join("\n"));
+  res.send(
+    "email,subscribed_at\n" +
+      store
+        .listSubscribers()
+        .map((s) => `${s.email},${s.createdAt}`)
+        .join("\n")
+  );
 });
 A.delete("/subscribers/:id", (req, res) => {
   store.deleteSubscriber(req.params.id);
@@ -431,10 +476,23 @@ app.get("/products/:slug", (req, res) => {
     "@graph": [
       { "@type": "Book", "@id": `${url}#book`, name: p.title, description, url, bookFormat: "https://schema.org/Hardcover" },
       {
-        "@type": "Product", "@id": `${url}#product`, name: p.title, description, url, sku: p.id,
+        "@type": "Product",
+        "@id": `${url}#product`,
+        name: p.title,
+        description,
+        url,
+        sku: p.id,
         ...(image ? { image: [image] } : {}),
         ...(p.price > 0
-          ? { offers: { "@type": "Offer", url, priceCurrency: "USD", price: (p.price / 100).toFixed(2), availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock" } }
+          ? {
+              offers: {
+                "@type": "Offer",
+                url,
+                priceCurrency: "USD",
+                price: (p.price / 100).toFixed(2),
+                availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+              },
+            }
           : {}),
       },
     ],

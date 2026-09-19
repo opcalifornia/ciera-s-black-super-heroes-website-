@@ -10,8 +10,15 @@ All copy is bracketed placeholder text and all images are labeled placeholder bo
     # store:  http://localhost:3000
     # admin:  http://localhost:3000/admin
 
-On first start, `data/seed.json` is copied to `data/db.json` (the live datastore).
-Delete `db.json` to reset to the placeholders.
+On first start, `data/seed.json` populates a new SQLite database at `data/store.db` (the live
+datastore). Delete `store.db` to reset to the placeholders.
+
+## Tests & code style
+    npm test           # vitest + supertest — products, newsletter, contact, orders,
+                        # the Stripe webhook (mocked signature), and admin auth
+    npm run lint        # eslint
+    npm run format      # prettier --write (server code; see .prettierignore)
+    npm run format:check
 
 ## Filling it in
 Everything text-based is editable in **Admin → Site content** and **Admin → Products**
