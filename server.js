@@ -1,11 +1,15 @@
-// Book storefront backend — Express + SQLite datastore.
+// Book storefront backend — Express + SQLite datastore + Stripe Checkout.
+require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
 const store = require("./db");
+const { getStripe } = require("./lib/stripe");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
+const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
+const SHIP_COUNTRIES = (process.env.SHIP_COUNTRIES || "US,CA").split(",").map((c) => c.trim()).filter(Boolean);
 
 const isEmail = (s) => typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 const clean = (s, max = 2000) => String(s ?? "").trim().slice(0, max);
@@ -13,6 +17,11 @@ const slugify = (s) => clean(s, 120).toLowerCase().replace(/[^a-z0-9]+/g, "-").r
 
 // ---------- app ----------
 const app = express();
+
+// Stripe webhook needs the raw body for signature verification, so it must
+// be registered before the global express.json() body parser below.
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 
@@ -66,13 +75,13 @@ app.post("/api/contact", rateLimit, (req, res) => {
 });
 
 // Checkout: prices are always recalculated server-side from the catalog.
-// STRIPE INTEGRATION POINT: create a Checkout Session here and return its URL.
-app.post("/api/orders", rateLimit, (req, res) => {
+// Creates a pending order, then a Stripe Checkout Session priced from it.
+// The shipping address is collected by Stripe, not by our own form.
+app.post("/api/orders", rateLimit, async (req, res) => {
   const { items, customer } = req.body || {};
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: "Your cart is empty." });
   if (!customer || !clean(customer.name)) return res.status(400).json({ error: "Enter your name." });
   if (!isEmail(customer.email)) return res.status(400).json({ error: "Enter a valid email address." });
-  if (!clean(customer.address)) return res.status(400).json({ error: "Enter a shipping address." });
 
   const lines = [];
   for (const it of items) {
@@ -81,21 +90,94 @@ app.post("/api/orders", rateLimit, (req, res) => {
     if (!p || !p.active) return res.status(400).json({ error: "An item in your cart is no longer available." });
     if (p.inventory !== null && p.inventory < qty)
       return res.status(400).json({ error: `Only ${p.inventory} left of "${p.title}".` });
+    if (p.price <= 0) return res.status(400).json({ error: `"${p.title}" doesn't have a price set yet.` });
     lines.push({ productId: p.id, title: p.title, unitPrice: p.price, qty });
   }
   const site = store.getSite();
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.qty, 0);
-  const shipping = subtotal >= site.freeShippingThreshold ? 0 : site.flatShipping;
-  // Inventory is decremented on payment confirmation (Stripe webhook), not here.
+  const shipping = subtotal >= site.freeShippingThreshold && site.freeShippingThreshold > 0 ? 0 : site.flatShipping;
+
+  // Inventory is decremented on payment confirmation (the webhook), not here.
   const order = store.createOrder({
-    customer: {
-      name: clean(customer.name, 120), email: clean(customer.email, 200),
-      address: clean(customer.address, 500), note: clean(customer.note, 1000),
-    },
+    customer: { name: clean(customer.name, 120), email: clean(customer.email, 200), address: "", note: clean(customer.note, 1000) },
     lines, subtotal, shipping, total: subtotal + shipping,
   });
-  res.json({ ok: true, orderNumber: order.number, total: order.total });
+
+  try {
+    const stripe = getStripe();
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: order.customer.email,
+      client_reference_id: order.id,
+      metadata: { orderId: order.id, orderNumber: String(order.number) },
+      line_items: lines.map((l) => ({
+        quantity: l.qty,
+        price_data: { currency: "usd", unit_amount: l.unitPrice, product_data: { name: l.title } },
+      })),
+      shipping_address_collection: SHIP_COUNTRIES.length ? { allowed_countries: SHIP_COUNTRIES } : undefined,
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            type: "fixed_amount",
+            fixed_amount: { amount: shipping, currency: "usd" },
+            display_name: shipping ? "Standard shipping" : "Free shipping",
+          },
+        },
+      ],
+      success_url: `${PUBLIC_URL}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${PUBLIC_URL}/cancel.html`,
+    });
+    store.setOrderStripeSession(order.id, session.id);
+    res.json({ ok: true, url: session.url, orderNumber: order.number });
+  } catch (err) {
+    console.error("Stripe checkout session error:", err.message);
+    res.status(502).json({ error: "Couldn't start checkout. Please try again in a moment." });
+  }
 });
+
+// Public, minimal status lookup for the success page (no PII beyond what
+// the shopper themselves already has: their own order number and status).
+app.get("/api/orders/by-session/:sessionId", (req, res) => {
+  const order = store.getOrderByStripeSession(req.params.sessionId);
+  if (!order) return res.status(404).json({ error: "Order not found." });
+  res.json({ orderNumber: order.number, status: order.status, total: order.total });
+});
+
+// ---------- Stripe webhook ----------
+async function handleStripeWebhook(req, res) {
+  const sig = req.headers["stripe-signature"];
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  let event;
+  try {
+    const stripe = getStripe();
+    if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is not set.");
+    event = stripe.webhooks.constructEvent(req.body, sig, secret);
+  } catch (err) {
+    console.error("Stripe webhook signature verification failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const orderId = session.metadata && session.metadata.orderId;
+    const order = (orderId && store.getOrderById(orderId)) || store.getOrderByStripeSession(session.id);
+    if (order && order.status !== "paid") {
+      const shipping = session.shipping_details || session.shipping || {};
+      const addr = shipping.address || (session.customer_details && session.customer_details.address) || null;
+      const addressLines = addr
+        ? [addr.line1, addr.line2, [addr.city, addr.state, addr.postal_code].filter(Boolean).join(", "), addr.country]
+            .filter(Boolean)
+            .join("\n")
+        : "";
+      if (addressLines) store.db.prepare("UPDATE orders SET customer_address = ? WHERE id = ?").run(addressLines, order.id);
+      for (const line of order.lines) store.decrementInventory(line.productId, line.qty);
+      const paid = store.markOrderPaid(order.id, { paymentIntentId: session.payment_intent });
+      // EMAIL INTEGRATION POINT: send the customer confirmation + owner alert here.
+    }
+  }
+
+  res.json({ received: true });
+}
 
 // ---------- admin API (Bearer token = ADMIN_PASSWORD) ----------
 function admin(req, res, next) {

@@ -289,10 +289,27 @@ const pages = {
           items: Cart.get().map(({ id, qty }) => ({ id, qty })),
           customer: Object.fromEntries(new FormData(e.target)),
         }) });
-        Cart.set([]);
-        $("#checkoutWrap").innerHTML = `<div class="page-head"><h1>Order #${r.orderNumber} placed</h1><p>A confirmation will go to your email. [Replace this with your payment step — see README.]</p><p style="margin-top:1.5rem"><a class="btn" href="/">Back to home</a></p></div>`;
+        location.href = r.url;
       } catch (err) { st.className = "status err"; st.textContent = err.message; btn.disabled = false; }
     };
+  },
+
+  async success() {
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get("session_id");
+    if (!sessionId) { $("#successBody").innerHTML = `<p>We couldn't find that order. <a href="/">Back to home</a>.</p>`; return; }
+    try {
+      const o = await api("/api/orders/by-session/" + encodeURIComponent(sessionId));
+      Cart.set([]);
+      const paid = o.status === "paid";
+      $("#successBody").innerHTML = `
+        <p>${paid ? "Thank you — your order is confirmed." : "Thanks! We're confirming your payment now."}</p>
+        <p><strong>Order #${o.orderNumber}</strong> · ${money(o.total)}</p>
+        <p>A confirmation email is on its way to you.</p>
+        <p style="margin-top:1.5rem"><a class="btn" href="/">Back to home</a></p>`;
+    } catch {
+      $("#successBody").innerHTML = `<p>We couldn't find that order. If you were charged, <a href="/contact">contact us</a> and we'll sort it out.</p>`;
+    }
   },
 };
 

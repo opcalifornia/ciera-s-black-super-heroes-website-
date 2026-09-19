@@ -38,9 +38,11 @@ Admin (header `Authorization: Bearer <ADMIN_PASSWORD>`): /api/admin/summary, sit
         orders, messages, subscribers, subscribers.csv
 
 ## Before going live
-1. **Payments.** `/api/orders` currently records orders as "pending payment" and recalculates
-   prices server-side. Add Stripe Checkout there: create a session from the order lines,
-   return its URL, redirect the customer, and mark the order "paid" from a Stripe webhook.
+1. ~~**Payments.**~~ Done — `/api/orders` creates a pending order, then a Stripe Checkout
+   Session priced server-side from the catalog, and returns its URL for the frontend to
+   redirect to. `/api/stripe/webhook` verifies the event signature, marks the order paid,
+   stores the Stripe session/payment-intent IDs, and decrements inventory. Set
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `PUBLIC_URL` — see `.env.example`.
 2. **Emails.** Send order confirmations and contact-form alerts (Resend, Postmark, SendGrid)
    from `/api/orders` and `/api/contact`, and sync `/api/newsletter` to her mailing list tool.
 3. **Database.** The JSON file is fine for launch-scale traffic on a single server. On

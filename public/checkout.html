@@ -21,9 +21,9 @@
         <label>Full name<input type="text" name="name" autocomplete="name" required></label>
         <label>Email<input type="email" name="email" autocomplete="email" required></label>
       </div>
-      <label>Shipping address<textarea name="address" autocomplete="street-address" style="min-height:110px" required></textarea></label>
       <label>Order note (optional)<input type="text" name="note" placeholder="Gift message, signing request, delivery note"></label>
-      <div><button class="btn accent block" type="submit">Place order</button><p class="status" id="checkoutStatus" role="status"></p></div>
+      <p class="hint" style="color:var(--muted);font-family:var(--ui);font-size:.85rem;margin:-.5rem 0 0">Shipping address is collected on the next, secure payment step.</p>
+      <div><button class="btn accent block" type="submit">Continue to payment</button><p class="status" id="checkoutStatus" role="status"></p></div>
     </form>
     <aside style="font-family:var(--ui);background:var(--card);padding:1.5rem;border:1px solid var(--line)">
       <h2 style="margin:0 0 1rem;font-size:1.1rem">Order summary</h2>
